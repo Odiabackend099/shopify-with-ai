@@ -344,3 +344,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
+
+# ========================================
+# DODO PAYMENTS PRODUCT IDS
+# ========================================
+DODO_PRODUCTS = {
+    "starter": "pdt_0Nca6q2zRqMTFNhTYPqb1",    # $29/mo - 30 AI calls
+    "growth":  "pdt_0Nca6q7q8fAIJSDxYXNBm",    # $79/mo - 100 AI calls
+    "scale":   "pdt_0Nca6qBBtiUmMNnGXyV8E",    # $199/mo - 500 AI calls
+}
+
+# ========================================
+# SUPABASE — MULTI-NAME SUPPORT
+# ========================================
