@@ -767,7 +767,7 @@ async def activate_free_credits(body: dict):
             "tier": plan,
             "status": "active",
             "ai_calls_limit": ai_calls_limit,
-            "ai_calls_used": 0,
+            
             "current_period_start": now.isoformat(),
             "current_period_end": (now + timedelta(days=365)).isoformat(),
             "is_trial": True,
@@ -778,7 +778,7 @@ async def activate_free_credits(body: dict):
             "tier": plan,
             "status": "active",
             "ai_calls_limit": ai_calls_limit,
-            "ai_calls_used": 0,
+            
             "current_period_start": now.isoformat(),
             "current_period_end": (now + timedelta(days=365)).isoformat(),
             "is_trial": True,
