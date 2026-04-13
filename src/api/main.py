@@ -411,43 +411,89 @@ def parse_jsonish(text: str) -> dict:
 @app.post("/v1/research/trending", tags=["Product Research"])
 async def research_trending_products(body: dict):
     from src.ai.nvidia_client import NVIDIAAIClient, run_agent, parse_agent_json
+    from src.ai.brave_search import get_brave_client
+    
     org_id = body.get("organization_id")
     niche = body.get("niche", "")
     count = body.get("count", 5)
+    
     if not org_id:
         raise HTTPException(400, "organization_id required")
     if not NVIDIA_API_KEY:
         raise HTTPException(500, "NVIDIA_API_KEY not configured")
+    
+    # Step 1: Real web search for trending products
+    search_results = []
+    try:
+        brave = get_brave_client()
+        search_results = brave.search_trending_products(
+            niche=niche,
+            country="US",
+            days=7,  # Past week
+        )
+        print(f"[research] Found {len(search_results)} search results from Brave")
+    except Exception as e:
+        print(f"[research] Brave Search failed: {e}")
+    
+    # Step 2: AI analysis of search results
     ai = NVIDIAAIClient(NVIDIA_API_KEY)
-    user_prompt = f"Find the top {count} dropshipping product opportunities"
+    
+    # Build context from real search results
+    search_context = ""
+    if search_results:
+        search_context = "\n\nREAL SEARCH RESULTS (April 2026):\n"
+        for i, r in enumerate(search_results[:10]):  # Top 10 results
+            search_context += f"\n{i+1}. {r['title']}\n   URL: {r['url']}\n   {r['description'][:200]}...\n"
+    
+    user_prompt = f"""Find the top {count} dropshipping product opportunities"""
     if niche:
         user_prompt += f" in the niche: {niche}"
-    user_prompt += ". Focus on products that can launch in Q2 2026. Return 5 products."
+    user_prompt += f""". Focus on products that can launch in April 2026.
+    
+{search_context}
+
+IMPORTANT: Base your product recommendations on the REAL search results above. Include source URLs in the 'sources' field for each product."""
+    
     response = run_agent(ai, "trend_hunter", user_prompt, model="fast")
     products = parse_agent_json(response)
+    
+    # Insert products into database
     inserted = []
     errors = []
     sb = get_supabase_service()
+    
     for p in products.get("products", []):
         try:
             row = {
                 "organization_id": org_id,
-                "name": p.get("product_name") or p.get("name", "Unknown"),
-                "category": p.get("niche", niche or "general"),
+                "product_name": p.get("product_name") or p.get("name", "Unknown"),
+                "niche": p.get("niche", niche or "general"),
+                "platform": p.get("platform", "web"),
+                "source_type": "ai_research_with_brave",
                 "trend_score": int(p.get("trend_score", 0)),
+                "price_range_usd": p.get("price_range_usd", "$0-50"),
                 "competition_level": p.get("competition_level", "medium"),
-                "sourcing_cost_estimate": float(p.get("sourcing_cost_estimate") or 0),
-                "selling_price_estimate": float(p.get("recommended_price_usd") or 0),
-                "supplier_count_estimate": int(p.get("supplier_count_estimate") or 0),
-                "source_type": p.get("platform", "ai_research"),
-                "notes": p.get("reason", ""),
+                "product_description": p.get("reason", ""),
+                "target_audience": p.get("target_audience", ""),
+                "metadata": {
+                    "sources": p.get("sources", []),
+                    "supplier_tips": p.get("supplier_tips", ""),
+                },
             }
             result = sb.table("product_ideas").insert(row).execute()
             if result.data:
-                inserted.append(row["name"])
+                inserted.append(row["product_name"])
         except Exception as e:
             errors.append(f"{p.get('product_name','unknown')}: {str(e)}")
-    return {"products": products.get("products", []), "research_summary": products.get("research_summary", ""), "usage": response.usage, "inserted": inserted, "errors": errors}
+    
+    return {
+        "products": products.get("products", []),
+        "research_summary": products.get("research_summary", ""),
+        "search_results_count": len(search_results),
+        "usage": response.usage,
+        "inserted": inserted,
+        "errors": errors,
+    }
 
 
 @app.post("/v1/agents/store-builder", tags=["AI Agents"])
