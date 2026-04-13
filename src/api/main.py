@@ -798,3 +798,15 @@ async def activate_free_credits(body: dict):
         "plan": plan,
         "message": f"{ai_calls_limit} free AI credits activated!"
     }
+
+@app.get("/debug/subscription-schema", tags=["Debug"])
+async def get_subscription_schema():
+    """Check what columns exist in subscriptions table."""
+    supabase = get_supabase_service()
+    try:
+        result = supabase.table("subscriptions").select("*").limit(1).execute()
+        if result.data:
+            return {"columns": list(result.data[0].keys())}
+        return {"columns": []}
+    except Exception as e:
+        return {"error": str(e)}
