@@ -105,28 +105,34 @@ def _sync_chat(api_key: str, messages: list, model: str = DEFAULT_MODEL) -> AIRe
 AGENT_PROMPTS = {
     "trend_hunter": """You are TrendHunter — an expert dropshipping product researcher.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text before or after:
 {
   "products": [
     {
-      "name": "Product Name",
-      "selling_price_range": "$20-40",
-      "supplier_cost_range": "$3-8",
-      "trend_score": 85,
+      "product_name": "Exact Product Name",
+      "niche": "outdoor fitness",
       "platform": "TikTok | Amazon | Instagram",
-      "reason": "Why this product is trending in Q2 2026",
-      "target_audience": "Who buys this",
-      "supplier_tips": "What to look for in a supplier"
+      "price_range_usd": "$20-40",
+      "competition_level": "low | medium | high",
+      "product_description": "What the product is and why it sells",
+      "target_audience": "Who buys this (age range, interests, behavior)",
+      "estimated_margin_pct": 65,
+      "top_supplier_country": "China",
+      "supplier_difficulty": "easy | medium | hard",
+      "ai_confidence_score": 85,
+      "trend_score": 85,
+      "recommended_price_usd": 35.99,
+      "supplier_tips": "What to look for in a supplier for this product"
     }
   ],
-  "research_summary": "2-3 sentence overview of the trend landscape"
+  "research_summary": "2-3 sentence overview of why these products are trending in Q2 2026"
 }
 
-Focus on products with: high social proof, lightweight for shipping, viral potential, 3-5x markup opportunity.""",
+Focus on products with: high social proof on TikTok/Reels, lightweight for cheap shipping, viral potential, 3-5x markup opportunity. Respond ONLY with the JSON.""",
 
     "store_builder": """You are StoreBuilder — an expert Shopify store designer and dropshipping specialist.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
 {
   "store_name": "Memorable Store Name",
   "tagline": "One-liner that converts",
@@ -142,7 +148,7 @@ Design for trust and conversions. Target: dropshipping beginners who need confid
 
     "ad_commander": """You are AdCommander — an expert Facebook/Meta and TikTok ad strategist for dropshipping.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
 {
   "facebook_ads": [
     {
@@ -162,11 +168,12 @@ OUTPUT FORMAT — respond with ONLY this JSON structure:
     "hashtag_strategy": ["#hashtag1", "#hashtag2"]
   },
   "campaign_notes": "2-3 sentences on targeting and creative direction"
-}""",
+}
+""",
 
     "copywriter": """You are CopyWriter — an expert e-commerce copywriter for dropshipping stores.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
 {
   "product_descriptions": [
     {
@@ -175,7 +182,7 @@ OUTPUT FORMAT — respond with ONLY this JSON structure:
       "short_description": "2-sentence value prop",
       "long_description": "Full paragraph with features, benefits, and social proof",
       "origin_story": "How this product was discovered",
-      "micro_copy": {" urgency_badge": "...", "stock_counter": "...", "guarantee": "..." }
+      "micro_copy": {"urgency_badge": "...", "stock_counter": "...", "guarantee": "..."}
     }
   ],
   "email_sequence": {
@@ -184,11 +191,12 @@ OUTPUT FORMAT — respond with ONLY this JSON structure:
     "abandoned_cart_subject": "...",
     "abandoned_cart_body": "..."
   }
-}""",
+}
+""",
 
     "supplier_scout": """You are SupplierScout — an expert at finding and vetting dropshipping suppliers.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
 {
   "suppliers": [
     {
@@ -202,11 +210,12 @@ OUTPUT FORMAT — respond with ONLY this JSON structure:
   ],
   "vetting_checklist": ["Step 1", "Step 2", "Step 3"],
   "sourcing_notes": "Additional guidance on finding reliable suppliers in 2026"
-}""",
+}
+""",
 
     "analytics_agent": """You are AnalyticsAgent — an expert at analyzing dropshipping store performance and optimization.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
 {
   "key_metrics": {
     "conversion_rate_benchmark": "X.X%",
@@ -223,7 +232,8 @@ OUTPUT FORMAT — respond with ONLY this JSON structure:
     "week_2": ["Action 3", "Action 4"],
     "week_3": ["Action 5", "Action 6"]
   }
-}""",
+}
+""",
 }
 
 # ============================================

@@ -286,12 +286,40 @@ async def research_trending_products(body: dict):
     response = run_agent(ai, "trend_hunter", user_prompt, model="fast")
     products = parse_agent_json(response)
 
-    # Save to product_ideas table
-    sb = get_supabase_service()
+    # Insert each product into DB — map AI fields to DB columns
+    inserted = []
+    errors = []
+
     for p in products.get("products", []):
-        p["organization_id"] = org_id
-        p["source_type"] = "ai_research"
-        sb.table("product_ideas").insert(p).execute()
+        try:
+            # Map AI output fields → exact DB column names
+            row = {
+                "organization_id": org_id,
+                "product_name": p.get("product_name") or p.get("name", "Unknown"),
+                "niche": p.get("niche", niche or "general"),
+                "platform": p.get("platform", "general"),
+                "source_type": "ai_research",
+                "trend_score": int(p.get("trend_score", 0)),
+                "price_range_usd": p.get("price_range_usd", "$0-$50"),
+                "competition_level": p.get("competition_level", "medium"),
+                "supplier_difficulty": p.get("supplier_difficulty", "easy"),
+                "product_description": p.get("product_description", p.get("reason", "")),
+                "estimated_margin_pct": int(p.get("estimated_margin_pct", 30)),
+                "top_supplier_country": p.get("top_supplier_country", "China"),
+                "recommended_price_usd": float(p.get("recommended_price_usd") or 0),
+                "target_audience": p.get("target_audience", ""),
+                "ai_confidence_score": int(p.get("ai_confidence_score", 70)),
+                "status": "idea",
+                "metadata": {
+                    "supplier_tips": p.get("supplier_tips", ""),
+                    "raw_ai_response": p,
+                },
+            }
+            result = supabase.table("product_ideas").insert(row).execute()
+            if result.data:
+                inserted.append(row["product_name"])
+        except Exception as e:
+            errors.append(f"{p.get('product_name','unknown')}: {str(e)}")
 
     return {
         "products": products.get("products", []),
