@@ -828,3 +828,100 @@ async def get_subscription_schema():
         return {"columns": []}
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================
+# SHOPIFY CONNECT (Token-based)
+# ============================================
+@app.post("/v1/shopify/connect", tags=["Shopify"])
+async def connect_shopify(
+    request: Request,
+    x_organization_id: str = Header(...),
+):
+    """Save Shopify store URL and access token for an organization."""
+    body = await request.json()
+    store_url = body.get("store_url", "").strip()
+    access_token = body.get("access_token", "").strip()
+
+    if not store_url or not access_token:
+        raise HTTPException(400, "store_url and access_token required")
+
+    # Clean store URL
+    store_url = store_url.replace("https://", "").replace("http://", "").rstrip("/")
+
+    # Encrypt token before storing (simple base64 for now - use proper encryption in production)
+    import base64
+    encrypted = base64.b64encode(access_token.encode()).decode()
+
+    sb = get_supabase_service()
+    sb.table("organizations").update({
+        "shopify_store_url": store_url,
+        "shopify_access_token_encrypted": encrypted,
+    }).eq("id", x_organization_id).execute()
+
+    return {"success": True, "store_url": store_url}
+
+
+# ============================================
+# META CONNECT
+# ============================================
+@app.post("/v1/meta/connect", tags=["Meta"])
+async def connect_meta(
+    request: Request,
+    x_organization_id: str = Header(...),
+):
+    """Save Meta ad account for an organization."""
+    body = await request.json()
+    access_token = body.get("access_token", "").strip()
+    ad_account_id = body.get("ad_account_id", "").strip()
+
+    if not access_token:
+        raise HTTPException(400, "access_token required")
+
+    # Encrypt token
+    import base64
+    encrypted = base64.b64encode(access_token.encode()).decode()
+
+    sb = get_supabase_service()
+    update = {
+        "meta_access_token_encrypted": encrypted,
+    }
+    if ad_account_id:
+        update["meta_ad_account_id"] = ad_account_id
+
+    sb.table("organizations").update(update).eq("id", x_organization_id).execute()
+
+    return {"success": True, "ad_account_id": ad_account_id}
+
+
+@app.get("/v1/meta/ad-insights", tags=["Meta"])
+async def get_meta_insights(
+    x_organization_id: str = Header(...),
+):
+    """Get ad performance data from Meta API."""
+    sb = get_supabase_service()
+    org = sb.table("organizations").select("*").eq("id", x_organization_id).execute()
+
+    if not org.data:
+        raise HTTPException(404, "Organization not found")
+
+    org_data = org.data[0]
+    ad_account_id = org_data.get("meta_ad_account_id")
+
+    if not ad_account_id or not org_data.get("meta_access_token_encrypted"):
+        raise HTTPException(400, "Meta not connected. Use /v1/meta/connect first.")
+
+    import base64
+    access_token = base64.b64decode(org_data["meta_access_token_encrypted"]).decode()
+
+    # Call Meta Graph API
+    import httpx
+    async with httpx.AsyncClient() as client:
+        fields = "impressions,clicks,spend,ctr,cpc,actions"
+        url = f"https://graph.facebook.com/v19.0/{ad_account_id}/insights?fields={fields}&access_token={access_token}"
+        response = await client.get(url, timeout=30.0)
+
+    if response.status_code != 200:
+        raise HTTPException(502, f"Meta API error: {response.text}")
+
+    data = response.json()
+    return {"insights": data.get("data", []), "account_id": ad_account_id}
