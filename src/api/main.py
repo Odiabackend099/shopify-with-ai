@@ -416,7 +416,9 @@ async def create_checkout(body: dict):
     product_id = DODO_PRODUCTS[plan]
 
     api_key = DODO_SECRET_KEY or DODO_TEST_API_KEY
-    is_test_mode = DODO_TEST_API_KEY and not DODO_SECRET_KEY
+    # Auto-detect test vs live: test keys start with GFWIN, live keys don't
+    is_test_key = api_key.startswith("GFWIN")
+    is_test_mode = is_test_key or (DODO_TEST_API_KEY and not DODO_SECRET_KEY)
     base_url = "https://test.dodopayments.com" if is_test_mode else "https://live.dodopayments.com"
 
     # Create checkout session via Dodo REST API (LIVE)
