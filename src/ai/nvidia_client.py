@@ -60,7 +60,7 @@ class NVIDIAAIClient:
                     "model": model,
                     "messages": messages,
                     "temperature": temperature,
-                    "max_tokens": max_tokens,
+                    "max_tokens": 2048,
                 },
             )
             response.raise_for_status()
@@ -86,7 +86,7 @@ def _sync_chat(api_key: str, messages: list, model: str = DEFAULT_MODEL) -> AIRe
     resp = httpx.post(
         f"{BASE_URL}/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 1024},
+        json={"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 2048},
         timeout=60,
     )
     resp.raise_for_status()
@@ -265,25 +265,44 @@ def run_agent(
     return _sync_chat(api_key, messages, model=selected_model)
 
 def parse_agent_json(response: AIResponse) -> dict:
-    """Extract JSON from agent response. Returns {} if invalid."""
+    """Extract JSON from agent response. Handles ```json blocks and bare JSON."""
+    text = response.content.strip()
+
+    # Remove surrounding whitespace/newlines
+    text = text.strip()
+
+    # Try direct parse
     try:
-        text = response.content.strip()
-        # Try direct parse first
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Try extracting from markdown code blocks
-    try:
-        start = text.index("```json") + 7
-        end = text.index("```", start)
-        return json.loads(text[start:end].strip())
-    except (ValueError, json.JSONDecodeError):
-        pass
+    # Try extracting from ```json code blocks (model returns this format)
+    json_patterns = [
+        r"```json\s*(\{.+?\})\s*```",      # ```json { ... } ```
+        r"```\s*(\{.+?\})\s*```",             # ``` { ... } ```
+        r"(\{[\s\S]+\})",                     # bare { ... } (greedy)
+    ]
 
+    for pattern in json_patterns:
+        matches = re.findall(pattern, text, re.DOTALL)
+        for match in matches:
+            try:
+                result = json.loads(match)
+                return result
+            except json.JSONDecodeError:
+                continue
+
+    # Last resort: find first { to last }
     try:
         start = text.index("{")
         end = text.rindex("}") + 1
-        return json.loads(text[start:end])
+        candidate = text[start:end]
+        # Only use if it looks like valid JSON (has "products" key)
+        parsed = json.loads(candidate)
+        if "products" in parsed or "suppliers" in parsed or "facebook_ads" in parsed:
+            return parsed
     except (ValueError, json.JSONDecodeError):
-        return {"products": [], "error": "Failed to parse agent response"}
+        pass
+
+    return {"products": [], "error": f"Failed to parse: {text[:100]}"}
