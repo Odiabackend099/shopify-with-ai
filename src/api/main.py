@@ -289,6 +289,7 @@ async def research_trending_products(body: dict):
     # Insert each product into DB — map AI fields to DB columns
     inserted = []
     errors = []
+    sb = get_supabase_service()
 
     for p in products.get("products", []):
         try:
@@ -315,7 +316,7 @@ async def research_trending_products(body: dict):
                     "raw_ai_response": p,
                 },
             }
-            result = supabase.table("product_ideas").insert(row).execute()
+            result = sb.table("product_ideas").insert(row).execute()
             if result.data:
                 inserted.append(row["product_name"])
         except Exception as e:
@@ -325,6 +326,8 @@ async def research_trending_products(body: dict):
         "products": products.get("products", []),
         "research_summary": products.get("research_summary", ""),
         "usage": response.usage,
+        "inserted": inserted,
+        "errors": errors,
     }
 
 # ============================================
