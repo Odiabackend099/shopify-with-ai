@@ -145,6 +145,28 @@ async def debug_env():
         "dodo_webhook_secret": "✓" if DODO_WEBHOOK_SECRET else "✗",
     }
 
+@app.post("/debug/fix-schema", tags=["Debug"])
+async def fix_schema():
+    """Fix missing columns in product_ideas table. Dev only."""
+    sb = get_supabase_service()
+    try:
+        sb.table("product_ideas").select("platform").limit(1).execute()
+    except Exception:
+        pass  # column missing
+    try:
+        sb.table("product_ideas").insert({
+            "organization_id": "00000000-0000-0000-0000-000000000000",
+            "product_name": "__init__",
+            "source_type": "system",
+            "platform": "general",
+            "niche": "",
+            "trend_score": 0,
+            "price_range_usd": "0",
+        }).execute()
+        return {"status": "schema_fixed"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)[:200]}
+
 # ============================================
 # ORGANIZATIONS
 # ============================================
