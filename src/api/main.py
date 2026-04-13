@@ -384,6 +384,124 @@ async def dodo_webhook(request: Request):
     return {"received": True}
 
 # ============================================
+# BILLING — DOODO PAYMENTS CHECKOUT SESSIONS
+# ============================================
+@app.post("/v1/billing/checkout", tags=["Billing"])
+async def create_checkout(body: dict):
+    """
+    Create a Dodo Payments checkout session for subscription upgrade.
+    Body: { "organization_id": "...", "plan": "starter|growth|scale" }
+    """
+    import httpx
+
+    org_id = body.get("organization_id")
+    plan = body.get("plan", "starter")
+
+    if not org_id:
+        raise HTTPException(400, "organization_id required")
+    if plan not in DODO_PRODUCTS:
+        raise HTTPException(400, f"Invalid plan. Choose: {list(DODO_PRODUCTS.keys())}")
+    if not DODO_SECRET_KEY:
+        raise HTTPException(500, "DODO_SECRET_KEY not configured")
+
+    sb = get_supabase_service()
+
+    # Get org and user info
+    org = sb.table("organizations").select("name").eq("id", org_id).execute()
+    users = sb.table("users").select("email").eq("organization_id", org_id).limit(1).execute()
+    customer_email = users.data[0]["email"] if users.data else ""
+    org_name = org.data[0]["name"] if org.data else "Customer"
+
+    product_id = DODO_PRODUCTS[plan]
+
+    # Create checkout session via Dodo REST API (LIVE)
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://live.dodopayments.com/checkouts",
+            headers={
+                "Authorization": f"Bearer {DODO_SECRET_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "product_cart": [{"product_id": product_id, "quantity": 1}],
+                "customer": {"email": customer_email, "name": org_name},
+                "return_url": f"{APP_URL}/dashboard?checkout=success&plan={plan}",
+                "cancel_url": f"{APP_URL}/dashboard?checkout=cancelled",
+                "metadata": {"organization_id": org_id, "plan": plan},
+            },
+            timeout=30.0,
+        )
+
+    if response.status_code not in (200, 201):
+        return {"error": f"Dodo returned {response.status_code}: {response.text[:200]}", "status_code": response.status_code}
+
+    data = response.json()
+    return {
+        "checkout_url": data.get("checkout_url"),
+        "session_id": data.get("session_id"),
+        "plan": plan,
+    }
+
+@app.get("/v1/billing/portal", tags=["Billing"])
+async def billing_portal(x_organization_id: str = Header(...)):
+    """
+    Get billing portal link for customer self-service.
+    Uses Dodo customer portal or direct link.
+    """
+    if not DODO_SECRET_KEY:
+        raise HTTPException(500, "DODO_SECRET_KEY not configured")
+
+    sb = get_supabase_service()
+    users = sb.table("users").select("email").eq("organization_id", x_organization_id).limit(1).execute()
+    customer_email = users.data[0]["email"] if users.data else ""
+
+    # Return Dodo-hosted portal or dashboard link
+    return {
+        "portal_url": f"https://app.dodopayments.com/customers/{customer_email}/subscriptions",
+        "dashboard_url": "https://app.dodopayments.com/dashboard",
+        "message": "Manage your subscription, update payment method, or cancel.",
+    }
+
+@app.get("/v1/billing/plans", tags=["Billing"])
+async def list_plans():
+    """Return available plans with Dodo product IDs."""
+    return {
+        "plans": [
+            {
+                "id": "free",
+                "name": "Free Trial",
+                "price_usd": 0,
+                "ai_calls": 30,
+                "description": "14-day free trial. No credit card required.",
+            },
+            {
+                "id": "starter",
+                "name": "Starter",
+                "price_usd": 9,  # promotional for early adopters
+                "ai_calls": 30,
+                "description": "Perfect for getting started. 30 AI calls/month.",
+                "dodo_product_id": DODO_PRODUCTS["starter"],
+            },
+            {
+                "id": "growth",
+                "name": "Growth",
+                "price_usd": 29,
+                "ai_calls": 100,
+                "description": "For serious dropshippers. 100 AI calls/month.",
+                "dodo_product_id": DODO_PRODUCTS["growth"],
+            },
+            {
+                "id": "scale",
+                "name": "Scale",
+                "price_usd": 79,
+                "ai_calls": 500,
+                "description": "Power users who need maximum AI power.",
+                "dodo_product_id": DODO_PRODUCTS["scale"],
+            },
+        ]
+    }
+
+# ============================================
 # ERROR HANDLER
 # ============================================
 @app.exception_handler(Exception)
