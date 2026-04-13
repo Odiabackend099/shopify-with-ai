@@ -925,3 +925,109 @@ async def get_meta_insights(
 
     data = response.json()
     return {"insights": data.get("data", []), "account_id": ad_account_id}
+
+
+# ============================================
+# AUTH-BACKED ORGANIZATION CREATION
+# ============================================
+class AuthOrgCreate(BaseModel):
+    user_id: str
+    email: str
+    name: str
+
+@app.post("/v1/organizations/from-auth", tags=["Organizations"])
+async def create_org_from_auth(body: AuthOrgCreate):
+    """
+    Create an organization for an authenticated Supabase user.
+    Called by frontend after Supabase Auth signup/signin.
+    """
+    sb = get_supabase_service()
+    
+    # Check if user already has an org
+    existing_user = sb.table("users").select("organization_id").eq("id", body.user_id).execute()
+    if existing_user.data and existing_user.data[0].get("organization_id"):
+        return {"organization_id": existing_user.data[0]["organization_id"]}
+    
+    # Create organization
+    org_result = sb.table("organizations").insert({
+        "name": body.name,
+        "plan": "free",
+    }).execute()
+    
+    if not org_result.data:
+        raise HTTPException(500, "Failed to create organization")
+    
+    org = org_result.data[0]
+    
+    # Create or update user record
+    sb.table("users").upsert({
+        "id": body.user_id,
+        "email": body.email,
+        "full_name": body.name,
+        "organization_id": org["id"],
+        "role": "owner",
+    }).execute()
+    
+    # Create free trial subscription
+    now = datetime.now(timezone.utc)
+    sb.table("subscriptions").insert({
+        "organization_id": org["id"],
+        "tier": "free",
+        "status": "trialing",
+        "ai_calls_limit": 15,
+        "current_period_start": now.isoformat(),
+        "current_period_end": (now + timedelta(days=14)).isoformat(),
+    }).execute()
+    
+    return {"organization_id": org["id"]}
+
+
+@app.get("/v1/organizations/me", tags=["Organizations"])
+async def get_my_organization(request: Request):
+    """
+    Get the current user's organization based on Supabase Auth.
+    Requires Bearer token in Authorization header.
+    """
+    # Extract user from Supabase Auth token
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(401, "Missing authorization header")
+    
+    token = auth_header.replace("Bearer ", "")
+    
+    # Verify token with Supabase
+    try:
+        import httpx
+        resp = httpx.get(
+            f"{settings.supabase_url}/auth/v1/user",
+            headers={
+                "apikey": settings.supabase_anon_key,
+                "Authorization": f"Bearer {token}",
+            }
+        )
+        if resp.status_code != 200:
+            raise HTTPException(401, "Invalid token")
+        
+        user_data = resp.json()
+        user_id = user_data["id"]
+    except Exception as e:
+        raise HTTPException(401, f"Auth verification failed: {str(e)}")
+    
+    # Get user's org
+    sb = get_supabase_service()
+    user_result = sb.table("users").select("*, organizations(*)").eq("id", user_id).execute()
+    
+    if not user_result.data:
+        raise HTTPException(404, "User not found")
+    
+    user = user_result.data[0]
+    org = user.get("organizations")
+    
+    return {
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user.get("full_name"),
+        },
+        "organization": org,
+    }
