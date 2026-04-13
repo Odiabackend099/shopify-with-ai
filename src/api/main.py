@@ -23,15 +23,15 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
-    nvidia_api_key: str = ""
-    supabase_url: str = "https://ykyemuahvxshtsrkhsfo.supabase.co"
-    supabase_anon_key: str = ""
-    supabase_service_role_key: str = ""
-    dodo_public_key: str = ""
-    dodo_secret_key: str = ""
-    dodo_webhook_secret: str = ""
-    app_secret: str = "dev-secret-change-in-production"
-    app_url: str = "https://shopifywithai.odia.dev"
+    nvidia_api_key: str = Field(default="", validation_alias="NVIDIA_API_KEY")
+    supabase_url: str = Field(default="https://ykyemuahvxshtsrkhsfo.supabase.co", validation_alias="SUPABASE_URL")
+    supabase_anon_key: str = Field(default="", validation_alias="SUPABASE_ANON_KEY")
+    supabase_service_role_key: str = Field(default="", validation_alias="SUPABASE_SERVICE_ROLE")
+    dodo_public_key: str = Field(default="", validation_alias="DODO_PAYMENTS_TEST_API_KEY")
+    dodo_secret_key: str = Field(default="", validation_alias="DODO_PAYMENTS_TEST_API_KEY")
+    dodo_webhook_secret: str = Field(default="", validation_alias="DODO_WEBHOOK_SECRET")
+    app_secret: str = Field(default="dev-secret", validation_alias="APP_SECRET")
+    app_url: str = Field(default="https://shopifywithai.odia.dev", validation_alias="APP_URL")
 
     class Config:
         extra = "allow"
