@@ -177,6 +177,18 @@ async def fix_schema():
 async def create_organization(body: OrganizationCreate):
     sb = get_supabase_service()
 
+    # Check if email already exists
+    existing = sb.table("users").select("id,organization_id").eq("email", body.email.lower().strip()).execute()
+    if existing.data:
+        # If user exists, return their existing organization
+        user = existing.data[0]
+        org = sb.table("organizations").select("*").eq("id", user["organization_id"]).execute().data[0]
+        return {
+            "organization": org,
+            "user": user,
+            "existing": True,
+        }
+
     org_result = sb.table("organizations").insert({"name": body.name, "plan": "free"}).execute()
     if not org_result.data:
         raise HTTPException(500, "Failed to create organization")
@@ -184,13 +196,19 @@ async def create_organization(body: OrganizationCreate):
     org = org_result.data[0]
     now = datetime.now(timezone.utc)
 
-    # Create user
-    sb.table("users").insert({
-        "email": body.email,
-        "full_name": body.name,
-        "organization_id": org["id"],
-        "role": "owner",
-    }).execute()
+    try:
+        user_result = sb.table("users").insert({
+            "email": body.email.lower().strip(),
+            "full_name": body.name,
+            "organization_id": org["id"],
+            "role": "owner",
+        }).execute()
+    except Exception as e:
+        # Rollback org creation if user creation fails
+        sb.table("organizations").delete().eq("id", org["id"]).execute()
+        if "23505" in str(e):  # duplicate key
+            raise HTTPException(409, "An account with this email already exists")
+        raise HTTPException(500, f"Failed to create user: {str(e)}")
 
     # Create free trial subscription
     sb.table("subscriptions").insert({
@@ -202,7 +220,7 @@ async def create_organization(body: OrganizationCreate):
         "current_period_end": (now + timedelta(days=14)).isoformat(),
     }).execute()
 
-    return {"organization": org}
+    return {"organization": org, "user": user_result.data[0] if user_result.data else None}
 
 @app.get("/v1/organizations/{org_id}", tags=["Organizations"])
 async def get_organization(org_id: str, x_organization_id: str = Header(...)):
