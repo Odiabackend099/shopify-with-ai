@@ -14,16 +14,14 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ============================================
-# CONFIG
-# ============================================
+
 class Settings(BaseSettings):
     nvidia_api_key: str = ""
     supabase_url: str = "https://ykyemuahvxshtsrkhsfo.supabase.co"
@@ -42,9 +40,6 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-# ============================================
-# SUPABASE CLIENTS
-# ============================================
 def get_supabase_service() -> Client:
     """Service-role client — bypasses RLS. Server-side only."""
     return create_client(settings.supabase_url, settings.supabase_service_role_key)
@@ -55,9 +50,6 @@ def get_supabase_anon() -> Client:
     return create_client(settings.supabase_url, settings.supabase_anon_key)
 
 
-# ============================================
-# LIFESPAN
-# ============================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"[shopify-with-ai] Starting — {datetime.now(timezone.utc)}")
@@ -68,9 +60,6 @@ async def lifespan(app: FastAPI):
     print(f"[shopify-with-ai] Shutdown")
 
 
-# ============================================
-# APP
-# ============================================
 app = FastAPI(
     title="Shopify with AI API",
     description="AI-powered dropshipping automation platform",
@@ -87,9 +76,7 @@ app.add_middleware(
 )
 
 
-# ============================================
-# MODELS
-# ============================================
+# ---- Models ----
 class HealthResponse(BaseModel):
     status: str
     timestamp: str
@@ -100,7 +87,7 @@ class HealthResponse(BaseModel):
 
 class OrganizationCreate(BaseModel):
     name: str
-    email: EmailStr
+    email: str
 
 
 class AgentTaskRequest(BaseModel):
@@ -109,9 +96,7 @@ class AgentTaskRequest(BaseModel):
     priority: int = Field(default=5, ge=1, le=10)
 
 
-# ============================================
-# HEALTH
-# ============================================
+# ---- Health ----
 @app.get("/health", tags=["Health"])
 async def health():
     """Health check — no DB calls, instant response."""
@@ -159,9 +144,7 @@ async def debug_env():
     }
 
 
-# ============================================
-# ORGANIZATIONS
-# ============================================
+# ---- Organizations ----
 @app.post("/v1/organizations", tags=["Organizations"])
 async def create_organization(body: OrganizationCreate):
     supabase = get_supabase_service()
@@ -193,9 +176,7 @@ async def get_organization(org_id: str, x_organization_id: str = Header(...)):
     return result.data[0]
 
 
-# ============================================
-# AI AGENT TASKS
-# ============================================
+# ---- AI Agent Tasks ----
 @app.post("/v1/tasks", tags=["AI Agents"])
 async def create_agent_task(body: AgentTaskRequest):
     supabase = get_supabase_service()
@@ -231,12 +212,10 @@ async def get_task(task_id: str):
     }
 
 
-# ============================================
-# WEBHOOKS
-# ============================================
+# ---- Webhooks ----
 @app.post("/webhooks/dodo", tags=["Webhooks"])
 async def dodo_webhook(request: Request):
-    """Receive Dodo Payments webhooks. Validate signature + process idempotently."""
+    """Receive Dodo Payments webhooks."""
     body = await request.body()
     sig = request.headers.get("dodo-signature", "")
 
@@ -258,7 +237,6 @@ async def dodo_webhook(request: Request):
     event_type = event.get("type", "")
     org_id = event.get("metadata", {}).get("organization_id")
 
-    # Idempotency: skip if already processed
     if event.get("id"):
         existing = supabase.table("billing_events").select("id").eq("dodo_event_id", event["id"]).execute()
         if existing.data:
@@ -286,9 +264,7 @@ async def dodo_webhook(request: Request):
     return {"received": True}
 
 
-# ============================================
-# ERROR HANDLERS
-# ============================================
+# ---- Error Handler ----
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
