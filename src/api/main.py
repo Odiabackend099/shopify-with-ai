@@ -770,7 +770,7 @@ async def activate_free_credits(body: dict):
             
             "current_period_start": now.isoformat(),
             "current_period_end": (now + timedelta(days=365)).isoformat(),
-            "is_trial": True,
+            
         }).eq("organization_id", org_id).execute()
     else:
         supabase.table("subscriptions").insert({
@@ -781,7 +781,7 @@ async def activate_free_credits(body: dict):
             
             "current_period_start": now.isoformat(),
             "current_period_end": (now + timedelta(days=365)).isoformat(),
-            "is_trial": True,
+            
         }).execute()
     
     # Record billing event
