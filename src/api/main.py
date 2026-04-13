@@ -569,6 +569,7 @@ async def run_store_builder(body: dict):
         "organization_id": org_id,
         "task_type": "store_setup",
         "status": "completed",
+        "input_payload": {"niche": niche, "products": products},
         "output_payload": result,
         "model_used": "minimaxai/minimax-m2.5",
     }).execute()
@@ -607,6 +608,7 @@ async def run_copywriter(body: dict):
         "organization_id": org_id,
         "task_type": "copywriting",
         "status": "completed",
+        "input_payload": {"product_name": product_name, "product_niche": product_niche},
         "output_payload": result,
         "model_used": "minimaxai/minimax-m2.5",
     }).execute()
@@ -645,6 +647,7 @@ async def run_ad_commander(body: dict):
         "organization_id": org_id,
         "task_type": "ad_creation",
         "status": "completed",
+        "input_payload": {"product_name": product_name, "target_audience": target_audience},
         "output_payload": result,
         "model_used": "minimaxai/minimax-m2.5",
     }).execute()
@@ -683,6 +686,7 @@ async def run_supplier_scout(body: dict):
         "organization_id": org_id,
         "task_type": "supplier_sourcing",
         "status": "completed",
+        "input_payload": {"product_name": product_name, "target_price": target_price},
         "output_payload": result,
         "model_used": "minimaxai/minimax-m2.5",
     }).execute()
@@ -722,6 +726,7 @@ async def run_analytics_agent(body: dict):
         "organization_id": org_id,
         "task_type": "analytics_review",
         "status": "completed",
+        "input_payload": {"store_url": store_url, "metrics": metrics},
         "output_payload": result,
         "model_used": "minimaxai/minimax-m2.5",
     }).execute()
