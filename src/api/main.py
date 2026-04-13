@@ -37,6 +37,7 @@ if not SUPABASE_ANON_KEY:
 
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 DODO_SECRET_KEY = os.environ.get("DODO_SECRET_KEY", "")
+DODO_TEST_API_KEY = os.environ.get("DODO_PAYMENTS_TEST_API_KEY", "")  # Render legacy name
 DODO_PUBLIC_KEY = os.environ.get("DODO_PUBLIC_KEY", "")
 DODO_WEBHOOK_SECRET = os.environ.get("DODO_WEBHOOK_SECRET", "")
 APP_URL = os.environ.get("APP_URL", "https://shopifywithai.odia.dev")
@@ -414,12 +415,16 @@ async def create_checkout(body: dict):
 
     product_id = DODO_PRODUCTS[plan]
 
+    api_key = DODO_SECRET_KEY or DODO_TEST_API_KEY
+    is_test_mode = DODO_TEST_API_KEY and not DODO_SECRET_KEY
+    base_url = "https://test.dodopayments.com" if is_test_mode else "https://live.dodopayments.com"
+
     # Create checkout session via Dodo REST API (LIVE)
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            "https://live.dodopayments.com/checkouts",
+            f"{base_url}/checkouts",
             headers={
-                "Authorization": f"Bearer {DODO_SECRET_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
