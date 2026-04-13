@@ -5,6 +5,7 @@ Secondary: moonshotai/kimi-k2-instruct
 """
 
 import os
+import re
 import json
 from dataclasses import dataclass
 from typing import Optional
@@ -43,7 +44,7 @@ class NVIDIAAIClient:
         messages: list[dict],
         model: str = DEFAULT_MODEL,
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
     ) -> AIResponse:
         """Send a chat completion request."""
         import time
@@ -60,7 +61,7 @@ class NVIDIAAIClient:
                     "model": model,
                     "messages": messages,
                     "temperature": temperature,
-                    "max_tokens": 2048,
+                    "max_tokens": max_tokens,
                 },
             )
             response.raise_for_status()
@@ -105,34 +106,32 @@ def _sync_chat(api_key: str, messages: list, model: str = DEFAULT_MODEL) -> AIRe
 AGENT_PROMPTS = {
     "trend_hunter": """You are TrendHunter — an expert dropshipping product researcher.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text before or after:
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
 {
   "products": [
     {
-      "product_name": "Exact Product Name",
-      "niche": "outdoor fitness",
-      "platform": "TikTok | Amazon | Instagram",
+      "product_name": "Product Name",
+      "niche": "Category",
+      "selling_price_range": "$20-40",
       "price_range_usd": "$20-40",
-      "competition_level": "low | medium | high",
-      "product_description": "What the product is and why it sells",
-      "target_audience": "Who buys this (age range, interests, behavior)",
-      "estimated_margin_pct": 65,
-      "top_supplier_country": "China",
-      "supplier_difficulty": "easy | medium | hard",
-      "ai_confidence_score": 85,
       "trend_score": 85,
-      "recommended_price_usd": 35.99,
-      "supplier_tips": "What to look for in a supplier for this product"
+      "platform": "TikTok | Amazon | Instagram",
+      "reason": "Why this product is trending in Q2 2026",
+      "target_audience": "Who buys this",
+      "supplier_tips": "What to look for in a supplier",
+      "competition_level": "low | medium | high",
+      "estimated_margin_pct": 60,
+      "recommended_price_usd": 29.99
     }
   ],
-  "research_summary": "2-3 sentence overview of why these products are trending in Q2 2026"
+  "research_summary": "2-3 sentence overview of the trend landscape"
 }
 
-Focus on products with: high social proof on TikTok/Reels, lightweight for cheap shipping, viral potential, 3-5x markup opportunity. Respond ONLY with the JSON.""",
+Focus on products with: high social proof, lightweight for shipping, viral potential, 3-5x markup opportunity.""",
 
     "store_builder": """You are StoreBuilder — an expert Shopify store designer and dropshipping specialist.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+OUTPUT FORMAT — respond with ONLY this JSON structure:
 {
   "store_name": "Memorable Store Name",
   "tagline": "One-liner that converts",
@@ -148,7 +147,7 @@ Design for trust and conversions. Target: dropshipping beginners who need confid
 
     "ad_commander": """You are AdCommander — an expert Facebook/Meta and TikTok ad strategist for dropshipping.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+OUTPUT FORMAT — respond with ONLY this JSON structure:
 {
   "facebook_ads": [
     {
@@ -168,12 +167,11 @@ OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
     "hashtag_strategy": ["#hashtag1", "#hashtag2"]
   },
   "campaign_notes": "2-3 sentences on targeting and creative direction"
-}
-""",
+}""",
 
     "copywriter": """You are CopyWriter — an expert e-commerce copywriter for dropshipping stores.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+OUTPUT FORMAT — respond with ONLY this JSON structure:
 {
   "product_descriptions": [
     {
@@ -191,16 +189,15 @@ OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
     "abandoned_cart_subject": "...",
     "abandoned_cart_body": "..."
   }
-}
-""",
+}""",
 
     "supplier_scout": """You are SupplierScout — an expert at finding and vetting dropshipping suppliers.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+OUTPUT FORMAT — respond with ONLY this JSON structure:
 {
   "suppliers": [
     {
-      "platform": "Alibaba | DHGate | 19.69%",
+      "platform": "Alibaba | DHGate | AliExpress",
       "search_terms": ["term1", "term2"],
       "what_to_look_for": "Key vetting criteria",
       "red_flags": ["flag1", "flag2"],
@@ -210,12 +207,11 @@ OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
   ],
   "vetting_checklist": ["Step 1", "Step 2", "Step 3"],
   "sourcing_notes": "Additional guidance on finding reliable suppliers in 2026"
-}
-""",
+}""",
 
     "analytics_agent": """You are AnalyticsAgent — an expert at analyzing dropshipping store performance and optimization.
 
-OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+OUTPUT FORMAT — respond with ONLY this JSON structure:
 {
   "key_metrics": {
     "conversion_rate_benchmark": "X.X%",
@@ -232,8 +228,7 @@ OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
     "week_2": ["Action 3", "Action 4"],
     "week_3": ["Action 5", "Action 6"]
   }
-}
-""",
+}""",
 }
 
 # ============================================
@@ -265,44 +260,31 @@ def run_agent(
     return _sync_chat(api_key, messages, model=selected_model)
 
 def parse_agent_json(response: AIResponse) -> dict:
-    """Extract JSON from agent response. Handles ```json blocks and bare JSON."""
-    text = response.content.strip()
-
-    # Remove surrounding whitespace/newlines
-    text = text.strip()
-
-    # Try direct parse
+    """Extract JSON from agent response. Returns {} if invalid."""
     try:
+        text = response.content.strip()
+        # Try direct parse first
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Try extracting from ```json code blocks (model returns this format)
-    json_patterns = [
-        r"```json\s*(\{.+?\})\s*```",      # ```json { ... } ```
-        r"```\s*(\{.+?\})\s*```",             # ``` { ... } ```
-        r"(\{[\s\S]+\})",                     # bare { ... } (greedy)
-    ]
-
-    for pattern in json_patterns:
-        matches = re.findall(pattern, text, re.DOTALL)
-        for match in matches:
-            try:
-                result = json.loads(match)
-                return result
-            except json.JSONDecodeError:
-                continue
-
-    # Last resort: find first { to last }
+    # Try extracting from markdown code blocks
     try:
-        start = text.index("{")
-        end = text.rindex("}") + 1
-        candidate = text[start:end]
-        # Only use if it looks like valid JSON (has "products" key)
-        parsed = json.loads(candidate)
-        if "products" in parsed or "suppliers" in parsed or "facebook_ads" in parsed:
-            return parsed
+        if "```json" in text:
+            start = text.index("```json") + 7
+            end = text.index("```", start)
+            return json.loads(text[start:end].strip())
+        elif "```" in text:
+            start = text.index("```") + 3
+            end = text.index("```", start)
+            return json.loads(text[start:end].strip())
     except (ValueError, json.JSONDecodeError):
         pass
 
-    return {"products": [], "error": f"Failed to parse: {text[:100]}"}
+    # Try extracting first JSON object
+    try:
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        return json.loads(text[start:end])
+    except (ValueError, json.JSONDecodeError):
+        return {"products": [], "error": "Failed to parse agent response"}
