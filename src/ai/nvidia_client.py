@@ -1,461 +1,279 @@
 """
 NVIDIA NIM AI Client for Shopify with AI
-Uses MiniMax M2.5 as primary model (fastest, clean output)
-Falls back to KIMI K2-instruct if rate-limited
+Model: minimaxai/minimax-m2.5 (fast, clean output, ~2s latency)
+Secondary: moonshotai/kimi-k2-instruct
 """
 
 import os
 import json
-import time
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
-from openai import OpenAI, RateLimitError, APIError
+from typing import Optional
+import httpx
 
-# Environment
-NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+# ============================================
+# CONFIG
+# ============================================
 BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_MODEL = "minimaxai/minimax-m2.5"
+FALLBACK_MODEL = "moonshotai/kimi-k2-instruct"
 
-# Model configs
-MODELS = {
-    "fast": {
-        "id": "minimaxai/minimax-m2.5",
-        "latency": 2.2,  # seconds
-        "max_tokens": 32768,
-        "supports_thinking": False,
-    },
-    "research": {
-        "id": "moonshotai/kimi-k2-thinking",
-        "latency": 5,  # seconds
-        "max_tokens": 32000,
-        "supports_thinking": True,
-    },
-    "backup": {
-        "id": "moonshotai/kimi-k2-instruct",
-        "latency": 36,  # seconds
-        "max_tokens": 128000,
-        "supports_thinking": False,
-    },
-}
-
+# ============================================
+# DATA CLASSES
+# ============================================
 @dataclass
 class AIResponse:
     content: str
     model: str
-    usage: Dict[str, int]
+    usage: dict
     latency_ms: int
-    finish_reason: str
 
-
+# ============================================
+# CLIENT
+# ============================================
 class NVIDIAAIClient:
-    """Production-ready AI client for Shopify with AI agent team."""
+    """Async client for NVIDIA NIM API (OpenAI-compatible)."""
 
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or NVIDIA_API_KEY
-        if not self.api_key:
-            raise ValueError("NVIDIA_API_KEY not set")
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=BASE_URL,
-            timeout=120,  # 2 min for slow models
+    def __init__(self, api_key: str, timeout: int = 60):
+        self.api_key = api_key
+        self.base_url = BASE_URL
+        self.timeout = timeout
+
+    async def chat(
+        self,
+        messages: list[dict],
+        model: str = DEFAULT_MODEL,
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+    ) -> AIResponse:
+        """Send a chat completion request."""
+        import time
+        start = time.time()
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        latency_ms = int((time.time() - start) * 1000)
+
+        return AIResponse(
+            content=data["choices"][0]["message"]["content"],
+            model=data.get("model", model),
+            usage=data.get("usage", {}),
+            latency_ms=latency_ms,
         )
 
-    def chat(
-        self,
-        messages: List[Dict[str, str]],
-        model: str = "fast",
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        thinking_tokens: int = 0,
-    ) -> AIResponse:
-        """
-        Send a chat completion request.
+# ============================================
+# SYNC WRAPPER
+# ============================================
+def _sync_chat(api_key: str, messages: list, model: str = DEFAULT_MODEL) -> AIResponse:
+    """Synchronous wrapper for background workers."""
+    import time
+    start = time.time()
 
-        Args:
-            messages: OpenAI-format messages [{"role": "user", "content": "..."}]
-            model: "fast" (MiniMax M2.5) | "research" (KIMI K2-thinking) | "backup" (KIMI K2-instruct)
-            max_tokens: max response tokens
-            temperature: creativity level (0.1 = precise, 1.0 = creative)
-            thinking_tokens: for research model, how many thinking tokens to allocate
+    resp = httpx.post(
+        f"{BASE_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 1024},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
-        Returns:
-            AIResponse with content, metadata
-        """
-        model_config = MODELS.get(model, MODELS["fast"])
-        model_id = model_config["id"]
-
-        start = time.time()
-        extra_body = {}
-
-        # Enable thinking mode for research model
-        if model == "research" and thinking_tokens > 0:
-            extra_body["thinking"] = {
-                "type": "thinking",
-                "thinking_tokens": thinking_tokens,
-            }
-
-        try:
-            response = self.client.chat.completions.create(
-                model=model_id,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                extra_body=extra_body if extra_body else None,
-            )
-
-            latency_ms = int((time.time() - start) * 1000)
-
-            # Handle KIMI K2.5 / KIMI K2-thinking: content may be None
-            # Output goes to reasoning/reasoning_content fields
-            raw_content = response.choices[0].message.content
-            reasoning = getattr(response.choices[0].message, "reasoning", None)
-            reasoning_content = getattr(
-                response.choices[0].message, "reasoning_content", None
-            )
-
-            # If content is None but we have reasoning output, use that
-            if raw_content is None and reasoning_content:
-                content = reasoning_content
-            elif raw_content is None and reasoning:
-                content = str(reasoning)
-            elif raw_content is None:
-                content = "(empty response)"
-            else:
-                content = raw_content
-
-            return AIResponse(
-                content=content,
-                model=model_id,
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                },
-                latency_ms=latency_ms,
-                finish_reason=response.choices[0].finish_reason,
-            )
-
-        except RateLimitError as e:
-            # Auto-retry with backup model
-            if model != "backup":
-                print(f"[NVIDIA AI] Rate limited on {model_id}, retrying with backup...")
-                return self.chat(
-                    messages=messages,
-                    model="backup",
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
-            raise e
-
-        except Exception as e:
-            print(f"[NVIDIA AI] Error: {e}")
-            raise e
-
+    return AIResponse(
+        content=data["choices"][0]["message"]["content"],
+        model=data.get("model", model),
+        usage=data.get("usage", {}),
+        latency_ms=int((time.time() - start) * 1000),
+    )
 
 # ============================================
-# AGENT PROMPTS — Ready for Production
+# AGENT SYSTEM PROMPTS
 # ============================================
+AGENT_PROMPTS = {
+    "trend_hunter": """You are TrendHunter — an expert dropshipping product researcher.
 
-SYSTEM_PROMPTS = {
-    "trend_hunter": """You are TrendHunter, the product research agent for Shopify with AI.
-
-Your mission: Find hot, sellable dropshipping products for the next 90 days.
-
-WORKFLOW:
-1. Analyze Google Trends data for: emerging consumer behaviors, seasonal patterns, viral social content
-2. Cross-reference with: Amazon Best Sellers, TikTok viral products, Shopify app trending products
-3. Validate: supplier availability on Alibaba/DHGate, competition level, pricing margins
-4. Output: Top 5 product opportunities ranked by: trend momentum × profit margin × ease of sourcing
-
-OUTPUT FORMAT (return as JSON):
-{{
+OUTPUT FORMAT — respond with ONLY this JSON structure, no other text:
+{
   "products": [
-    {{
-      "name": "Product name",
-      "niche": "target niche",
-      "trend_score": 0-100,
-      "estimated_cost": "USD supplier price",
-      "selling_price_range": "USD retail",
-      "competition": "low|medium|high",
-      "supplier_confidence": "high|medium|low",
-      "source": "where you found it",
-      "why_now": "1 sentence why this is hot right now",
-      "creative_angle": "viral marketing angle"
-    }}
+    {
+      "name": "Product Name",
+      "selling_price_range": "$20-40",
+      "supplier_cost_range": "$3-8",
+      "trend_score": 85,
+      "platform": "TikTok | Amazon | Instagram",
+      "reason": "Why this product is trending in Q2 2026",
+      "target_audience": "Who buys this",
+      "supplier_tips": "What to look for in a supplier"
+    }
   ],
-  "research_summary": "2 sentences on overall market direction"
-}}
-
-CONTEXT: Current date is April 2026. Consider: post-pandemic consumer behaviors, AI accessories, Gen Z dorm culture, sustainability, portable wellness tech.
-
-You run on MiniMax M2.5. Be concise. No preamble. Just the JSON.""",
-
-    "store_builder": """You are StoreBuilder, the AI agent that creates Shopify stores for Shopify with AI.
-
-Your mission: Given a product idea, generate a complete, ready-to-launch Shopify store configuration.
-
-WORKFLOW:
-1. Create store brand identity (name, tagline, color palette, typography)
-2. Design homepage structure (hero, featured products, trust badges, testimonials placeholder)
-3. Write product page copy (title, description, bullet points, CTA buttons)
-4. Configure store settings (shipping zones, payment providers, policy pages)
-5. Generate: logo concept, theme color palette, content templates
-
-OUTPUT FORMAT (return as JSON):
-{{
-  "store": {{
-    "brand_name": "Store name",
-    "tagline": "One-line value proposition",
-    "theme_colors": ["#primary", "#secondary", "#accent"],
-    "fonts": {{"heading": "font-name", "body": "font-name"}},
-    "logo_description": "logo design concept in text"
-  }},
-  "pages": {{
-    "homepage": {{
-      "hero_headline": "...",
-      "hero_subheadline": "...",
-      "hero_cta": "...",
-      "featured_section_header": "...",
-      "trust_badges": ["badge1", "badge2", "badge3"],
-      "footer_claims": ["claim1", "claim2", "claim3"]
-    }},
-    "product": {{
-      "title_template": "...",
-      "description_template": "...",
-      "bullets": ["bullet1", "bullet2", "..."],
-      "cta_text": "..."
-    }}
-  }},
-  "settings": {{
-    "shipping_policy": "...",
-    "return_policy": "...",
-    "payment_options": ["Shopify Payments", "PayPal", "Apple Pay"]
-  }},
-  "implementation_notes": ["note1", "note2"]
-}}
-
-You run on MiniMax M2.5. Return ONLY valid JSON. No markdown code blocks. No explanation.""",
-
-    "ad_commander": """You are AdCommander, the AI agent that creates and launches Meta (Facebook/Instagram) ads for Shopify with AI.
-
-Your mission: Generate complete ad campaigns — copy, creative concepts, targeting recommendations, budget allocation.
-
-WORKFLOW:
-1. Analyze the product and target audience
-2. Create 3 ad variants (different hooks/angles)
-3. Write ad copy: headline, body, CTA, ad labels
-4. Specify creative direction (image/video concept)
-5. Recommend targeting parameters (age, interests, behaviors, lookalike sources)
-6. Allocate budget across ad sets
-
-OUTPUT FORMAT (return as JSON):
-{{
-  "campaign": {{
-    "name": "Campaign name",
-    "objective": "Conversions | Traffic | Engagement",
-    "total_budget_usd": number
-  }},
-  "ad_sets": [
-    {{
-      "name": "Ad set name",
-      "targeting": {{
-        "age_min": number,
-        "age_max": number,
-        "genders": ["male", "female", "all"],
-        "interests": ["interest1", "interest2"],
-        "behaviors": ["behavior1"],
-        "geo_targeting": ["US", "CA", "GB"]
-      }},
-      "budget_usd": number,
-      "bid_strategy": "lowest cost | target cost"
-    }}
-  ],
-  "ads": [
-    {{
-      "variant": "A | B | C",
-      "headline": "...",
-      "body": "...",
-      "cta": "Shop Now | Learn More | Sign Up",
-      "creative_description": "image/video concept for this ad"
-    }}
-  ],
-  "expected_cpl": "estimated cost per lead in USD",
-  "launch_checklist": ["check1", "check2"]
-}}
-
-You run on MiniMax M2.5. Return ONLY valid JSON. No preamble.""",
-
-    "copywriter": """You are Copywriter, the AI agent that writes high-converting e-commerce copy for Shopify with AI.
-
-Your mission: Write product descriptions, email sequences, landing page copy, and ad copy that converts.
-
-CONTEXT:
-- You're writing for dropshipping stores
-- Target: Gen Z and Millennial online shoppers
-- Tone: Conversational, benefit-focused, trust-building
-- Format: Copy that scans well (short paragraphs, bullet points, emotional hooks)
-
-OUTPUT FORMAT (return as JSON):
-{{
-  "product_description": {{
-    "headline": "Emotional hook headline",
-    "subheadline": "Supporting claim",
-    "body": "2-3 paragraph product description",
-    "bullets": ["benefit-focused bullet 1", "bullet 2", "..."],
-    "social_proof_line": "One-liner that builds trust",
-    "cta": "Final call to action"
-  }},
-  "email_sequence": {{
-    "subject_lines": ["subject1", "subject2", "subject3"],
-    "emails": [
-      {{
-        "day": "0 | 1 | 3 | 7 | 14",
-        "subject": "email subject",
-        "preview": "email preview text",
-        "body": "email body copy",
-        "cta": "CTA text"
-      }}
-    ]
-  }},
-  "ad_copy_variants": [
-    {{"variant": "A", "headline": "...", "body": "...", "cta": "..."}},
-    {{"variant": "B", "headline": "...", "body": "...", "cta": "..."}}
-  ]
-}}
-
-You run on MiniMax M2.5. Return ONLY valid JSON. No markdown.""",
-
-    "supplier_scout": """You are SupplierScout, the AI agent that finds and validates suppliers for Shopify with AI.
-
-Your mission: Given a product, find, vet, and rank suppliers from Alibaba/DHGate.
-
-WORKFLOW:
-1. Identify top supplier countries (China primary, Vietnam/India backup)
-2. Search for suppliers with: Trade Assurance, Verified status, high response rate
-3. Evaluate: minimum order quantities, pricing tiers, production capacity
-4. Validate: factory audit status, quality certification, shipping options
-5. Rank suppliers by: reliability × price × communication quality
-
-OUTPUT FORMAT (return as JSON):
-{{
-  "product_requirements": {{
-    "product_name": "...",
-    "specifications": ["spec1", "spec2"],
-    "target_price_usd": "...",
-    "quantity_for_pricing": 100
-  }},
-  "suppliers": [
-    {{
-      "name": "Supplier name",
-      "location": "City, Country",
-      "alibaba_url": "https://...",
-      "rating": "4.5/5 stars",
-      "trade_assurance": true,
-      "verified": true,
-      "min_order_qty": number,
-      "unit_price_at_moq": "USD",
-      "production_capacity": "units per month",
-      "response_time_hours": number,
-      "samples_available": true,
-      "shipping_options": ["Express 7-15 days", "Sea 25-40 days"],
-      "factory_audit_passed": true,
-      "quality_certifications": ["ISO 9001"],
-      "notes": "Why this supplier is recommended"
-    }}
-  ],
-  "recommended_supplier": "Supplier name",
-  "negotiation_tips": ["tip1", "tip2", "tip3"]
-}}
-
-You run on MiniMax M2.5. Return ONLY valid JSON. No preamble.""",
-
-    "analytics_agent": """You are AnalyticsAgent, the AI agent that reviews Shopify store and ad performance for Shopify with AI.
-
-Your mission: Review performance data, identify issues, and recommend optimizations.
-
-INPUT: You will receive structured performance data (can be partial/missing)
-OUTPUT: Prioritized action plan
-
-ANALYZE:
-- Conversion rates (by product, traffic source, device)
-- ROAS (return on ad spend) by campaign/ad set
-- Customer acquisition cost trends
-- Top-selling products vs. dead weight
-- Cart abandonment patterns
-- Email/notification sequence effectiveness
-- Pricing elasticity signals
-
-OUTPUT FORMAT (return as JSON):
-{{
-  "scorecard": {{
-    "overall_health": "green | yellow | red",
-    "roas_trend": "improving | stable | declining",
-    "conversion_trend": "improving | stable | declining",
-    "cac_trend": "improving | stable | declining"
-  }},
-  "alerts": [
-    {{"severity": "critical | warning | info", "issue": "...", "impact": "..."}}
-  ],
-  "wins": [
-    {{"metric": "...", "value": "...", "why_it_worked": "..."}}
-  ],
-  "recommended_actions": [
-    {{
-      "priority": 1-5,
-      "action": "...",
-      "expected_impact": "...",
-      "effort": "low | medium | high"
-    }}
-  ],
-  "budget_recommendations": {{
-    "increase_spend_on": ["campaign1"],
-    "pause_or_reduce": ["campaign2"],
-    "reallocate_to_test": "new creative | new audience | new product"
-  }}
-}}
-
-You run on MiniMax M2.5. Return ONLY valid JSON. No explanation.""",
+  "research_summary": "2-3 sentence overview of the trend landscape"
 }
 
+Focus on products with: high social proof, lightweight for shipping, viral potential, 3-5x markup opportunity.""",
 
+    "store_builder": """You are StoreBuilder — an expert Shopify store designer and dropshipping specialist.
+
+OUTPUT FORMAT — respond with ONLY this JSON structure:
+{
+  "store_name": "Memorable Store Name",
+  "tagline": "One-liner that converts",
+  "color_scheme": {"primary": "#HEXCODE", "accent": "#HEXCODE", "background": "#HEXCODE"},
+  "logo_description": "What the logo should look like",
+  "hero_section": {"headline": "...", "subheadline": "...", "cta": "..."},
+  "top_products": ["Product 1", "Product 2", "Product 3"],
+  "trust_signals": ["Signal 1", "Signal 2", "Signal 3"],
+  "about_text": "50-word brand story"
+}
+
+Design for trust and conversions. Target: dropshipping beginners who need confidence to buy.""",
+
+    "ad_commander": """You are AdCommander — an expert Facebook/Meta and TikTok ad strategist for dropshipping.
+
+OUTPUT FORMAT — respond with ONLY this JSON structure:
+{
+  "facebook_ads": [
+    {
+      "ad_type": "Single Image | Carousel | Video",
+      "primary_text": "Hook sentence (max 25 chars)",
+      "headline": "Bold claim (max 40 chars)",
+      "description": "Supporting detail (max 20 chars)",
+      "cta": "Shop Now | Learn More | Sign Up",
+      "target_interest": "Facebook interest targeting",
+      "budget_suggestion": "$5-10/day test"
+    }
+  ],
+  "tiktok_concept": {
+    "hook_seconds": "First 3 seconds hook description",
+    "main_message": "What the video communicates",
+    "call_to_action": "End screen CTA",
+    "hashtag_strategy": ["#hashtag1", "#hashtag2"]
+  },
+  "campaign_notes": "2-3 sentences on targeting and creative direction"
+}""",
+
+    "copywriter": """You are CopyWriter — an expert e-commerce copywriter for dropshipping stores.
+
+OUTPUT FORMAT — respond with ONLY this JSON structure:
+{
+  "product_descriptions": [
+    {
+      "product_name": "Product",
+      "headline": "Compelling headline (max 60 chars)",
+      "short_description": "2-sentence value prop",
+      "long_description": "Full paragraph with features, benefits, and social proof",
+      "origin_story": "How this product was discovered",
+      "micro_copy": {" urgency_badge": "...", "stock_counter": "...", "guarantee": "..." }
+    }
+  ],
+  "email_sequence": {
+    "welcome_subject": "...",
+    "welcome_body": "...",
+    "abandoned_cart_subject": "...",
+    "abandoned_cart_body": "..."
+  }
+}""",
+
+    "supplier_scout": """You are SupplierScout — an expert at finding and vetting dropshipping suppliers.
+
+OUTPUT FORMAT — respond with ONLY this JSON structure:
+{
+  "suppliers": [
+    {
+      "platform": "Alibaba | DHGate | 19.69%",
+      "search_terms": ["term1", "term2"],
+      "what_to_look_for": "Key vetting criteria",
+      "red_flags": ["flag1", "flag2"],
+      "negotiation_tips": ["tip1", "tip2"],
+      "estimated_cost": "$X-Y per unit at 100/mo volume"
+    }
+  ],
+  "vetting_checklist": ["Step 1", "Step 2", "Step 3"],
+  "sourcing_notes": "Additional guidance on finding reliable suppliers in 2026"
+}""",
+
+    "analytics_agent": """You are AnalyticsAgent — an expert at analyzing dropshipping store performance and optimization.
+
+OUTPUT FORMAT — respond with ONLY this JSON structure:
+{
+  "key_metrics": {
+    "conversion_rate_benchmark": "X.X%",
+    "avg_order_value_target": "$X",
+    "roas_target": "3x-5x on ads",
+    "refund_rate_threshold": "<3%"
+  },
+  "diagnostic_questions": ["Question 1", "Question 2", "Question 3"],
+  "quick_wins": [
+    {"problem": "...", "solution": "...", "expected_impact": "..."}
+  ],
+  "optimization_plan": {
+    "week_1": ["Action 1", "Action 2"],
+    "week_2": ["Action 3", "Action 4"],
+    "week_3": ["Action 5", "Action 6"]
+  }
+}""",
+}
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
 def run_agent(
     client: NVIDIAAIClient,
     agent_name: str,
-    user_input: str,
+    user_prompt: str,
     model: str = "fast",
-    thinking_tokens: int = 0,
 ) -> AIResponse:
-    """Run a named agent with the given input."""
-    system_prompt = SYSTEM_PROMPTS.get(agent_name, SYSTEM_PROMPTS["trend_hunter"])
+    """
+    Run a named agent with a user prompt.
+    Uses minimaxai/minimax-m2.5 (fast, ~2s).
+    """
+    api_key = client.api_key if isinstance(client, NVIDIAAIClient) else client
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_input},
-    ]
-
-    return client.chat(
-        messages=messages,
-        model=model,
-        max_tokens=4096,
-        temperature=0.7,
-        thinking_tokens=thinking_tokens,
+    selected_model = DEFAULT_MODEL if model == "fast" else (
+        FALLBACK_MODEL if model == "backup" else model
     )
 
+    system = AGENT_PROMPTS.get(agent_name, "You are a helpful AI assistant.")
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    return _sync_chat(api_key, messages, model=selected_model)
 
 def parse_agent_json(response: AIResponse) -> dict:
-    """Parse agent JSON output, stripping any markdown code blocks."""
-    raw = response.content.strip()
-    # Strip markdown code blocks if present
-    if raw.startswith("```"):
-        # Remove ```json and trailing ```
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:-1])  # Remove first and last line
+    """Extract JSON from agent response. Returns {} if invalid."""
+    try:
+        text = response.content.strip()
+        # Try direct parse first
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting from markdown code blocks
+    try:
+        start = text.index("```json") + 7
+        end = text.index("```", start)
+        return json.loads(text[start:end].strip())
+    except (ValueError, json.JSONDecodeError):
+        pass
 
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        # Try to extract JSON from mixed content
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start != -1 and end != 0:
-            return json.loads(raw[start:end])
-        raise ValueError(f"Cannot parse JSON: {e}\nContent: {raw[:500]}")
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        return json.loads(text[start:end])
+    except (ValueError, json.JSONDecodeError):
+        return {"products": [], "error": "Failed to parse agent response"}
