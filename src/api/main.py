@@ -734,3 +734,67 @@ async def run_analytics_agent(body: dict):
     }).execute()
     
     return {"analytics": result, "usage": response.usage}
+
+# ========================================
+# FREE CREDITS ACTIVATION
+# ========================================
+@app.post("/v1/billing/activate-free", tags=["Billing"])
+async def activate_free_credits(body: dict):
+    """
+    Activate free credits for a new organization.
+    No payment required — credits are granted immediately.
+    """
+    org_id = body.get("organization_id")
+    plan = body.get("plan", "growth")
+    
+    if not org_id:
+        raise HTTPException(status_code=400, detail="organization_id required")
+    
+    now = datetime.now(timezone.utc)
+    
+    # Calculate credits based on plan
+    credits_map = {"starter": 5, "growth": 15, "scale": 30}
+    ai_calls_limit = credits_map.get(plan, 15)
+    
+    # Update subscription with free tier
+    supabase = get_supabase_service()
+    
+    # Check if subscription exists
+    existing = supabase.table("subscriptions").select("id").eq("organization_id", org_id).execute()
+    
+    if existing.data:
+        supabase.table("subscriptions").update({
+            "tier": plan,
+            "status": "active",
+            "ai_calls_limit": ai_calls_limit,
+            "ai_calls_used": 0,
+            "current_period_start": now.isoformat(),
+            "current_period_end": (now + timedelta(days=365)).isoformat(),
+            "is_trial": True,
+        }).eq("organization_id", org_id).execute()
+    else:
+        supabase.table("subscriptions").insert({
+            "organization_id": org_id,
+            "tier": plan,
+            "status": "active",
+            "ai_calls_limit": ai_calls_limit,
+            "ai_calls_used": 0,
+            "current_period_start": now.isoformat(),
+            "current_period_end": (now + timedelta(days=365)).isoformat(),
+            "is_trial": True,
+        }).execute()
+    
+    # Record billing event
+    supabase.table("billing_events").insert({
+        "organization_id": org_id,
+        "event_type": "free_credits_activated",
+        "amount_cents": 0,
+        "metadata": {"plan": plan, "credits": ai_calls_limit},
+    }).execute()
+    
+    return {
+        "success": True,
+        "credits": ai_calls_limit,
+        "plan": plan,
+        "message": f"{ai_calls_limit} free AI credits activated!"
+    }
