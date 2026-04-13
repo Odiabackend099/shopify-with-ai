@@ -1,0 +1,12 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+gunicorn==23.0.0
+supabase==2.8.0
+python-dotenv==1.0.1
+httpx==0.27.2
+pydantic==2.9.0
+pydantic-settings==2.5.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+stripe==3.0.0  # keep for future use
+openai==1.52.0
