@@ -21,41 +21,38 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ============================================
+# CONFIG — reads from environment variables
+# ============================================
+# Direct os.environ reads — works reliably in all environments
 
-class Settings(BaseSettings):
-    nvidia_api_key: str = Field(default="", validation_alias="NVIDIA_API_KEY")
-    supabase_url: str = Field(default="https://ykyemuahvxshtsrkhsfo.supabase.co", validation_alias="SUPABASE_URL")
-    supabase_anon_key: str = Field(default="", validation_alias="SUPABASE_ANON_KEY")
-    supabase_service_role_key: str = Field(default="", validation_alias="SUPABASE_SERVICE_ROLE")
-    dodo_public_key: str = Field(default="", validation_alias="DODO_PAYMENTS_TEST_API_KEY")
-    dodo_secret_key: str = Field(default="", validation_alias="DODO_PAYMENTS_TEST_API_KEY")
-    dodo_webhook_secret: str = Field(default="", validation_alias="DODO_WEBHOOK_SECRET")
-    app_secret: str = Field(default="dev-secret", validation_alias="APP_SECRET")
-    app_url: str = Field(default="https://shopifywithai.odia.dev", validation_alias="APP_URL")
-
-    class Config:
-        extra = "allow"
-
-
-settings = Settings()
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ykyemuahvxshtsrkhsfo.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE", "")  # Render uses this name
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+DODO_PAYMENTS_TEST_API_KEY = os.environ.get("DODO_PAYMENTS_TEST_API_KEY", "")
+DODO_SECRET_KEY = os.environ.get("DODO_SECRET_KEY", os.environ.get("DODO_PAYMENTS_TEST_API_KEY", ""))
+DODO_WEBHOOK_SECRET = os.environ.get("DODO_WEBHOOK_SECRET", "")
+APP_SECRET = os.environ.get("APP_SECRET", "dev-secret")
+APP_URL = os.environ.get("APP_URL", "https://shopifywithai.odia.dev")
 
 
 def get_supabase_service() -> Client:
     """Service-role client — bypasses RLS. Server-side only."""
-    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 def get_supabase_anon() -> Client:
     """Anon client — respects RLS."""
-    return create_client(settings.supabase_url, settings.supabase_anon_key)
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"[shopify-with-ai] Starting — {datetime.now(timezone.utc)}")
-    print(f"  Supabase : {settings.supabase_url}")
-    print(f"  NVIDIA   : {'✓' if settings.nvidia_api_key else '✗ missing'}")
-    print(f"  Dodo     : {'✓' if settings.dodo_secret_key else '✗ missing'}")
+    print(f"  Supabase : {SUPABASE_URL}")
+    print(f"  NVIDIA   : {'✓' if NVIDIA_API_KEY else '✗ missing'}")
+    print(f"  Dodo     : {'✓' if DODO_SECRET_KEY else '✗ missing'}")
     yield
     print(f"[shopify-with-ai] Shutdown")
 
@@ -103,9 +100,9 @@ async def health():
     return HealthResponse(
         status="ok",
         timestamp=datetime.now(timezone.utc).isoformat(),
-        supabase="✓" if settings.supabase_service_role_key else "✗ missing",
-        dodo="✓" if settings.dodo_secret_key else "✗ missing",
-        nvidia="✓" if settings.nvidia_api_key else "✗ missing",
+        supabase="✓" if SUPABASE_SERVICE_ROLE_KEY else "✗ missing",
+        dodo="✓" if DODO_SECRET_KEY else "✗ missing",
+        nvidia="✓" if NVIDIA_API_KEY else "✗ missing",
     )
 
 
@@ -113,7 +110,7 @@ async def health():
 async def health_db():
     """Health check that also verifies Supabase connection."""
     supabase_ok = "✗"
-    if settings.supabase_service_role_key:
+    if SUPABASE_SERVICE_ROLE_KEY:
         try:
             supabase = get_supabase_service()
             result = supabase.table("organizations").select("id").limit(1).execute()
@@ -125,8 +122,8 @@ async def health_db():
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "supabase": supabase_ok,
-        "dodo": "✓" if settings.dodo_secret_key else "✗ missing",
-        "nvidia": "✓" if settings.nvidia_api_key else "✗ missing",
+        "dodo": "✓" if DODO_SECRET_KEY else "✗ missing",
+        "nvidia": "✓" if NVIDIA_API_KEY else "✗ missing",
     }
 
 
@@ -134,13 +131,13 @@ async def health_db():
 async def debug_env():
     """Show which env vars are set (values redacted)."""
     return {
-        "supabase_url": settings.supabase_url,
-        "supabase_anon_key": "✓" if settings.supabase_anon_key else "✗",
-        "supabase_service_role_key": "✓" if settings.supabase_service_role_key else "✗",
-        "nvidia_api_key": "✓" if settings.nvidia_api_key else "✗",
-        "dodo_secret_key": "✓" if settings.dodo_secret_key else "✗",
-        "dodo_public_key": "✓" if settings.dodo_public_key else "✗",
-        "dodo_webhook_secret": "✓" if settings.dodo_webhook_secret else "✗",
+        "supabase_url": SUPABASE_URL,
+        "supabase_anon_key": "✓" if SUPABASE_ANON_KEY else "✗",
+        "supabase_service_role_key": "✓" if SUPABASE_SERVICE_ROLE_KEY else "✗",
+        "nvidia_api_key": "✓" if NVIDIA_API_KEY else "✗",
+        "dodo_secret_key": "✓" if DODO_SECRET_KEY else "✗",
+        "dodo_public_key": "✓" if DODO_PAYMENTS_TEST_API_KEY else "✗",
+        "dodo_webhook_secret": "✓" if DODO_WEBHOOK_SECRET else "✗",
     }
 
 
@@ -219,9 +216,9 @@ async def dodo_webhook(request: Request):
     body = await request.body()
     sig = request.headers.get("dodo-signature", "")
 
-    if settings.dodo_webhook_secret and sig:
+    if DODO_WEBHOOK_SECRET and sig:
         expected = hmac.new(
-            settings.dodo_webhook_secret.encode(),
+            DODO_WEBHOOK_SECRET.encode(),
             body,
             hashlib.sha256,
         ).hexdigest()
