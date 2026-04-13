@@ -81,6 +81,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://storewright.odia.dev",
+        "https://www.storewright.odia.dev",
         "https://shopifywithai.odia.dev",
         "https://www.shopifywithai.odia.dev",
         "https://*.vercel.app",
