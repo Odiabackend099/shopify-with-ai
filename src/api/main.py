@@ -535,3 +535,195 @@ DODO_PRODUCTS = {
 # ========================================
 # SUPABASE — MULTI-NAME SUPPORT
 # ========================================
+
+# ============================================
+# STORE BUILDER AGENT
+# ============================================
+@app.post("/v1/agents/store-builder", tags=["AI Agents"])
+async def run_store_builder(body: dict):
+    """Generate store design blueprint."""
+    from src.ai.nvidia_client import NVIDIAAIClient, run_agent, parse_agent_json
+    
+    org_id = body.get("organization_id")
+    niche = body.get("niche", "")
+    products = body.get("products", [])
+    
+    if not org_id:
+        raise HTTPException(400, "organization_id required")
+    if not NVIDIA_API_KEY:
+        raise HTTPException(500, "NVIDIA_API_KEY not configured")
+    
+    ai = NVIDIAAIClient(NVIDIA_API_KEY)
+    user_prompt = f"Design a dropshipping store"
+    if niche:
+        user_prompt += f" for niche: {niche}"
+    if products:
+        user_prompt += f". Top products: {', '.join(products[:3])}"
+    
+    response = run_agent(ai, "store_builder", user_prompt, model="fast")
+    result = parse_agent_json(response)
+    
+    # Save to agent_tasks
+    sb = get_supabase_service()
+    sb.table("agent_tasks").insert({
+        "organization_id": org_id,
+        "task_type": "store_setup",
+        "status": "completed",
+        "output_payload": result,
+        "model_used": "minimaxai/minimax-m2.5",
+    }).execute()
+    
+    return {"store_blueprint": result, "usage": response.usage}
+
+# ============================================
+# COPYWRITER AGENT
+# ============================================
+@app.post("/v1/agents/copywriter", tags=["AI Agents"])
+async def run_copywriter(body: dict):
+    """Generate product descriptions and email sequences."""
+    from src.ai.nvidia_client import NVIDIAAIClient, run_agent, parse_agent_json
+    
+    org_id = body.get("organization_id")
+    product_name = body.get("product_name", "")
+    product_niche = body.get("product_niche", "")
+    
+    if not org_id:
+        raise HTTPException(400, "organization_id required")
+    if not NVIDIA_API_KEY:
+        raise HTTPException(500, "NVIDIA_API_KEY not configured")
+    
+    ai = NVIDIAAIClient(NVIDIA_API_KEY)
+    user_prompt = f"Write copy for a dropshipping product: {product_name}"
+    if product_niche:
+        user_prompt += f" in the {product_niche} niche"
+    user_prompt += ". Include product description, welcome email, and abandoned cart email."
+    
+    response = run_agent(ai, "copywriter", user_prompt, model="fast")
+    result = parse_agent_json(response)
+    
+    # Save to agent_tasks
+    sb = get_supabase_service()
+    sb.table("agent_tasks").insert({
+        "organization_id": org_id,
+        "task_type": "copywriting",
+        "status": "completed",
+        "output_payload": result,
+        "model_used": "minimaxai/minimax-m2.5",
+    }).execute()
+    
+    return {"copy": result, "usage": response.usage}
+
+# ============================================
+# AD COMMANDER AGENT
+# ============================================
+@app.post("/v1/agents/ad-commander", tags=["AI Agents"])
+async def run_ad_commander(body: dict):
+    """Generate Facebook and TikTok ad concepts."""
+    from src.ai.nvidia_client import NVIDIAAIClient, run_agent, parse_agent_json
+    
+    org_id = body.get("organization_id")
+    product_name = body.get("product_name", "")
+    target_audience = body.get("target_audience", "")
+    
+    if not org_id:
+        raise HTTPException(400, "organization_id required")
+    if not NVIDIA_API_KEY:
+        raise HTTPException(500, "NVIDIA_API_KEY not configured")
+    
+    ai = NVIDIAAIClient(NVIDIA_API_KEY)
+    user_prompt = f"Create ad concepts for: {product_name}"
+    if target_audience:
+        user_prompt += f". Target audience: {target_audience}"
+    user_prompt += ". Include Facebook ad copy and TikTok video concept."
+    
+    response = run_agent(ai, "ad_commander", user_prompt, model="fast")
+    result = parse_agent_json(response)
+    
+    # Save to agent_tasks
+    sb = get_supabase_service()
+    sb.table("agent_tasks").insert({
+        "organization_id": org_id,
+        "task_type": "ad_creation",
+        "status": "completed",
+        "output_payload": result,
+        "model_used": "minimaxai/minimax-m2.5",
+    }).execute()
+    
+    return {"ads": result, "usage": response.usage}
+
+# ============================================
+# SUPPLIER SCOUT AGENT
+# ============================================
+@app.post("/v1/agents/supplier-scout", tags=["AI Agents"])
+async def run_supplier_scout(body: dict):
+    """Find and vet suppliers for a product."""
+    from src.ai.nvidia_client import NVIDIAAIClient, run_agent, parse_agent_json
+    
+    org_id = body.get("organization_id")
+    product_name = body.get("product_name", "")
+    target_price = body.get("target_price", "")
+    
+    if not org_id:
+        raise HTTPException(400, "organization_id required")
+    if not NVIDIA_API_KEY:
+        raise HTTPException(500, "NVIDIA_API_KEY not configured")
+    
+    ai = NVIDIAAIClient(NVIDIA_API_KEY)
+    user_prompt = f"Find suppliers for: {product_name}"
+    if target_price:
+        user_prompt += f". Target cost under ${target_price}"
+    user_prompt += ". Include vetting checklist and negotiation tips."
+    
+    response = run_agent(ai, "supplier_scout", user_prompt, model="fast")
+    result = parse_agent_json(response)
+    
+    # Save to agent_tasks
+    sb = get_supabase_service()
+    sb.table("agent_tasks").insert({
+        "organization_id": org_id,
+        "task_type": "supplier_sourcing",
+        "status": "completed",
+        "output_payload": result,
+        "model_used": "minimaxai/minimax-m2.5",
+    }).execute()
+    
+    return {"suppliers": result, "usage": response.usage}
+
+# ============================================
+# ANALYTICS AGENT
+# ============================================
+@app.post("/v1/agents/analytics", tags=["AI Agents"])
+async def run_analytics_agent(body: dict):
+    """Analyze store performance and suggest optimizations."""
+    from src.ai.nvidia_client import NVIDIAAIClient, run_agent, parse_agent_json
+    
+    org_id = body.get("organization_id")
+    store_url = body.get("store_url", "")
+    metrics = body.get("metrics", {})
+    
+    if not org_id:
+        raise HTTPException(400, "organization_id required")
+    if not NVIDIA_API_KEY:
+        raise HTTPException(500, "NVIDIA_API_KEY not configured")
+    
+    ai = NVIDIAAIClient(NVIDIA_API_KEY)
+    user_prompt = "Analyze dropshipping store performance and suggest optimizations."
+    if store_url:
+        user_prompt += f" Store: {store_url}"
+    if metrics:
+        user_prompt += f" Current metrics: {json.dumps(metrics)}"
+    
+    response = run_agent(ai, "analytics_agent", user_prompt, model="fast")
+    result = parse_agent_json(response)
+    
+    # Save to agent_tasks
+    sb = get_supabase_service()
+    sb.table("agent_tasks").insert({
+        "organization_id": org_id,
+        "task_type": "analytics_review",
+        "status": "completed",
+        "output_payload": result,
+        "model_used": "minimaxai/minimax-m2.5",
+    }).execute()
+    
+    return {"analytics": result, "usage": response.usage}
